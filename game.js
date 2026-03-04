@@ -252,8 +252,14 @@ class Tetris {
         this.autoPlay = false;                       // 自動玩法開關
         this.autoPlayInterval = null;                 // 自動玩法定時器
 
+        // 循環狀態
+        this.isLooping = false;                      // 記錄循環是否正在運行
+
         // 綁定鍵盤與按鈕事件
         this.bindEvents();
+
+        // 啟動初始遊戲循環 (負責繪製背景與未開始狀態)
+        this.gameLoop();
     }
 
     /**
@@ -283,7 +289,7 @@ class Tetris {
         this.dropInterval = 1000;                       // 重置掉落速度
         this.lastDrop = Date.now();                     // 重置計時
         this.lastLevel = 1;                             // 重置等級記錄
-        
+
         // 停止並清除自動玩法定時器
         if (this.autoPlayInterval) {
             clearInterval(this.autoPlayInterval);
@@ -302,7 +308,13 @@ class Tetris {
      */
     start() {
         this.started = true;
+        this.spawnPiece();                            // 產生第一個方塊
         this.lastDrop = Date.now();
+
+        // 如果循環因為遊戲結束而停止，則重新啟動
+        if (!this.isLooping) {
+            this.gameLoop();
+        }
     }
 
     /**
@@ -503,6 +515,9 @@ class Tetris {
      * 若無法下降則鎖定方塊並檢查消除
      */
     drop() {
+        // 如果方塊為空，則直接返回
+        if (!this.currentPiece) return;
+
         this.currentPiece.y++;
         if (this.collide(this.board, this.currentPiece)) {
             this.currentPiece.y--;
@@ -513,70 +528,6 @@ class Tetris {
         this.lastDrop = Date.now();
     }
 
-    hardDrop() {
-        while (!this.collide(this.board, { ...this.currentPiece, y: this.currentPiece.y + 1 })) {
-            this.currentPiece.y++;
-            this.score += 2;
-        }
-        this.lock();
-        this.clearLines();
-        this.spawnPiece();
-        this.updateScore();
-    }
-
-    lock() {
-        for (let y = 0; y < this.currentPiece.shape.length; y++) {
-            for (let x = 0; x < this.currentPiece.shape[y].length; x++) {
-                if (this.currentPiece.shape[y][x] !== 0) {
-                    const boardY = this.currentPiece.y + y;
-                    const boardX = this.currentPiece.x + x;
-                    if (boardY >= 0) {
-                        this.board[boardY][boardX] = this.currentPiece.color;
-                    }
-                }
-            }
-        }
-    }
-
-    clearLines() {
-        let linesCleared = 0;
-
-        for (let y = ROWS - 1; y >= 0; y--) {
-            if (this.board[y].every(cell => cell !== 0)) {
-                this.board.splice(y, 1);
-                this.board.unshift(Array(COLS).fill(0));
-                linesCleared++;
-                y++;
-            }
-        }
-
-        if (linesCleared > 0) {
-            this.lines += linesCleared;
-            this.combo++;
-
-            const baseScore = [0, 100, 300, 500, 800][linesCleared] * this.level;
-            const comboBonus = this.combo > 1 ? 50 * this.combo * this.level : 0;
-            this.score += baseScore + comboBonus;
-
-            const oldLevel = this.level;
-            this.level = Math.floor(this.lines / 10) + 1;
-            this.dropInterval = Math.max(100, 1000 - (this.level - 1) * 100);
-
-            this.sounds.lineClear(linesCleared);
-            if (this.level > oldLevel) {
-                this.sounds.levelUp();
-            }
-
-            this.animateLineClear();
-            if (this.combo > 1) {
-                this.showComboEffect(this.combo);
-            }
-            this.updateScore();
-        } else {
-            this.combo = 0;
-            this.updateScore();
-        }
-    }
 
     /**
      * 消除行數動畫效果
@@ -668,7 +619,7 @@ class Tetris {
      */
     drawBlock(x, y, color) {
         const padding = 1;
-        
+
         // 繪製方塊主體
         this.ctx.fillStyle = color;
         this.ctx.fillRect(
@@ -733,7 +684,12 @@ class Tetris {
      * 使用 requestAnimationFrame 實現流暢的遊戲更新
      */
     gameLoop() {
-        if (this.gameOver) return;
+        if (this.gameOver) {
+            this.isLooping = false;
+            return;
+        }
+        this.isLooping = true;
+
         // 遊戲尚未開始時只進行繪製
         if (!this.started) {
             this.draw();
@@ -743,7 +699,7 @@ class Tetris {
 
         // 檢查是否應該自動掉落
         const now = Date.now();
-        if (!this.paused && now - this.lastDrop > this.dropInterval) {
+        if (!this.paused && this.currentPiece && now - this.lastDrop > this.dropInterval) {
             this.drop();  // 執行軟掉落
         }
 
@@ -757,7 +713,7 @@ class Tetris {
      */
     showGameOver() {
         this.sounds.gameOver();  // 播放結束音效
-        
+
         // 如果自動玩法開啟，則停止並還原速度
         if (this.autoPlay) {
             this.autoPlay = false;
@@ -768,7 +724,7 @@ class Tetris {
             document.getElementById('btn-auto').textContent = '🤖';
             this.dropInterval = Math.min(1000, this.dropInterval * 10);
         }
-        
+
         // 顯示最終分數與遊戲結束畫面
         document.getElementById('final-score').textContent = this.score;
         document.getElementById('game-over').classList.remove('hidden');
